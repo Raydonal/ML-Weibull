@@ -1,0 +1,911 @@
+---
+title: "Reproducible research on paper Weibull Regression and Machine Learning Survival Models. Methodology, Comparison and Application to Biomedical Data Related to Cardiac Surgery"
+author: "Thalytta Cavalcante, Raydonal Ospina, Víctor Leiva, Xavier Cabezas, Carlos Martin-Barreiro"
+date: "`r Sys.Date()`"
+output: 
+  prettydoc::html_pretty:
+    theme: cayman
+    highlight: github
+vignette: >
+  %\VignetteIndexEntry{Vignette Title}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+header-includes:
+- \usepackage[english]{babel}
+- \usepackage[latin1]{inputenc}
+- \usepackage{amsmath,amsthm}
+- \usepackage{amssymb,latexsym}
+- \usepackage{graphics}
+- \usepackage{graphicx}
+- \usepackage{amscd,eufrak}
+- \usepackage{placeins}
+- \usepackage{setspace}
+- \usepackage{url}
+- \usepackage{color}
+- \setcounter{secnumdepth}{-1}
+- \usepackage{pgfplots}
+- \usepackage{subfigure}
+- \usepackage{geometry}
+- \usepackage{chngcntr}
+- \onehalfspacing
+- \counterwithin{figure}{section}
+- \counterwithin{table}{section}
+---
+
+
+```{r number_figures, echo=FALSE, warning=FALSE, message=FALSE, eval=TRUE}
+suppressPackageStartupMessages(library(knitr))
+#https://rstudio-pubs-static.s3.amazonaws.com/274181_55917dc35eee48efac24c0d6fa9f0c11.html
+```
+
+
+```{r startup, echo = FALSE, warning = FALSE, message=FALSE}
+knitr::opts_chunk$set(echo = TRUE, 
+                      warning = FALSE,
+                      message = FALSE,
+                      fig.width  = 10,
+                      # fig.height = 13,
+                      fig.cap = '',
+                      fig.align = 'center', 
+                      dpi = 72*2)#, global.par = TRUE)
+
+options(width = 150, 
+        scipen = 1e3)
+
+# load the package
+suppressPackageStartupMessages(library(plyr))
+suppressPackageStartupMessages(library(dplyr))
+suppressPackageStartupMessages(library(ggplot2))
+suppressPackageStartupMessages(library(waffle))
+suppressPackageStartupMessages(library(survival))
+suppressPackageStartupMessages(library(tidyverse))
+suppressPackageStartupMessages(library(MASS))
+suppressPackageStartupMessages(library(flexsurv))
+suppressPackageStartupMessages(library(dynpred))
+suppressPackageStartupMessages(library(readxl))
+suppressPackageStartupMessages(library(xtable))
+suppressPackageStartupMessages(library(randomForestSRC))
+suppressPackageStartupMessages(library(survival))
+suppressPackageStartupMessages(library(survminer))
+suppressPackageStartupMessages(library(gtsummary))
+suppressPackageStartupMessages(library(survival))
+suppressPackageStartupMessages(library(lubridate))
+suppressPackageStartupMessages(library(ggsurvfit))
+suppressPackageStartupMessages(library(gtsummary))
+suppressPackageStartupMessages(library(tidycmprsk))
+suppressPackageStartupMessages(library(kableExtra))
+suppressPackageStartupMessages(library(scales))
+suppressPackageStartupMessages(library(ggridges))
+suppressPackageStartupMessages(library(reshape))
+suppressPackageStartupMessages(library(reshape2))
+suppressPackageStartupMessages(library(magrittr))
+suppressPackageStartupMessages(library(htmlTable))
+suppressPackageStartupMessages(library(gridExtra)) 
+suppressPackageStartupMessages(library(Hmisc))
+suppressPackageStartupMessages(library(RColorBrewer))
+suppressPackageStartupMessages(library(caret))
+suppressPackageStartupMessages(library(ggRandomForests))
+#=============================================================================
+```
+# Data set (small view)
+```{r, echo=F, message=FALSE, warning=FALSE}
+dados <- read_excel("viarapida.xlsm",sheet=1, col_names=T)
+colnames(dados)<-c("TCC", "DELTA", "AGE", "PROTOCOL", "RACE", "SEX", "PATT")
+
+dados$PROTOCOL <- as.factor(dados$PROTOCOL)
+dados$PROTOCOL <- revalue(dados$PROTOCOL, c("0" = "conventional", 
+                                            "1" = "fast-track"))
+
+dados$RACE <- as.factor(dados$RACE)
+dados$RACE <- revalue(dados$RACE, c("1" = "white", 
+                                    "2" = "black", 
+                                    "3" = "asian"))
+
+dados$SEX <- as.factor(dados$SEX)
+dados$SEX <- revalue(dados$SEX, c("0" = "female", 
+                                  "1" = "male"))
+
+dados$PATT <- as.factor(dados$PATT)
+dados$PATT <- revalue(dados$PATT, c("0" = "congenital",
+                                                    "1" = "coronary"))
+kable(head(dados, n=5))
+
+
+```
+
+## Table 1
+```{r, echo=F, warning=FALSE, message=FALSE, comment=NA}
+dt <- dados %>% group_by(PATT, PROTOCOL) %>% summarise(N=n(), Mean=mean(AGE), SD =sd(AGE), Min=min(AGE), Median=median(AGE), Max=max(AGE)) %>% dplyr::mutate_if(is.numeric, round, 1)
+
+tab.AGE <- xtabs(cbind(N,Mean, SD,Min,Median,Max) ~ PATT+PROTOCOL,data = dt) 
+
+ftable(tab.AGE)
+```
+
+# Table 2
+```{r, echo=F, warning=FALSE, message=FALSE, comment=NA}
+
+dt <- dados %>% group_by(PATT, PROTOCOL, SEX) %>% summarise(N=n()) %>% mutate(Prop=N/sum(N)*100) %>% dplyr::mutate_if(is.numeric, round, 1)
+
+tab.PATT <- xtabs(cbind(N,Prop) ~  PATT+SEX +PROTOCOL, data = dt)
+
+ftable(tab.PATT)
+```
+
+# Table 3
+```{r, echo=F, warning=FALSE, message=FALSE, comment=NA}
+
+dt <- dados %>% group_by(PATT, PROTOCOL, RACE) %>% summarise(N=n()) %>% mutate(Prop=N/sum(N)*100) %>% dplyr::mutate_if(is.numeric, round, 1)
+
+tab.RACE <- xtabs(cbind(N,Prop) ~  PATT+RACE +PROTOCOL, data = dt)
+
+ftable(tab.RACE)
+```
+
+# Figure 3
+```{r, echo=F, warning=FALSE, message=FALSE, comment=NA, results='hide'}
+# Fig 3a
+cols <-  hcl.colors(length(levels(dados$SEX)), "blue-Yellow 3")
+tb <-table(dados$SEX)
+df <- data.frame(tb)
+colnames(df) <- c("sex","count")
+# Hole size
+hsize <- 1.5
+p.1 <- ggplot(df, aes(x = hsize, y = count, fill = sex)) +
+  geom_col(color = "black") +
+  geom_text(aes(label = paste("", round(count/145*100,0), "%", sep = "")),
+            position = position_stack(vjust = 0.5), size=9) +
+  coord_polar(theta = "y") +
+  scale_fill_manual(values = cols) +
+  xlim(c(0.2, hsize + 0.5)) + guides(fill=guide_legend(title="")) + 
+  theme(panel.background = element_rect(fill = "white"),
+        panel.grid = element_blank(),
+        axis.title = element_blank(),
+        axis.ticks = element_blank(),
+        axis.text = element_blank(), legend.text=element_text(size=rel(1.5)), legend.position="bottom") +
+  annotate(geom = 'text', x = 0.25, y = 0.0, label = "Sex", color = 'black', size = 9)
+
+# save the plot
+ggsave("Fig3a.pdf", p.1, width = 8, height = 8)
+
+# Fig 3b
+cols <-  hcl.colors(length(levels(dados$PROTOCOL)), "Temps")
+tb <-table(dados$PROTOCOL)
+df <- data.frame(tb)
+colnames(df) <- c("protocol","count")
+# Hole size
+hsize <- 1.5
+p.2 <- ggplot(df, aes(x = hsize, y = count, fill = protocol)) +
+  geom_col(color = "black") +
+  geom_text(aes(label = paste("", round(count/145*100,0), "%", sep = "")),
+            position = position_stack(vjust = 0.5), size=9) +
+  coord_polar(theta = "y") +
+  scale_fill_manual(values = cols) +
+  xlim(c(0.2, hsize + 0.5)) + guides(fill=guide_legend(title="")) + 
+  theme(panel.background = element_rect(fill = "white"),
+        panel.grid = element_blank(),
+        axis.title = element_blank(),
+        axis.ticks = element_blank(),
+        axis.text = element_blank(), legend.text=element_text(size=rel(1.5)), legend.position="bottom") +
+  annotate(geom = 'text', x = 0.25, y = 0.0, label = "Protocol Care", color = 'black', size = 9)
+# save the plot
+ggsave("Fig3b.pdf", p.2, width = 8, height = 8)
+
+# Fig 3c
+cols <-  hcl.colors(length(levels(dados$PATT)), "Green-Orange")
+tb <-table(dados$PATT)
+df <- data.frame(tb)
+colnames(df) <- c("type_patient","count")
+# Hole size
+hsize <- 1.5
+p.3 <- ggplot(df, aes(x = hsize, y = count, fill = type_patient)) +
+  geom_col(color = "black") +
+  geom_text(aes(label = paste("", round(count/145*100,0), "%", sep = "")),
+            position = position_stack(vjust = 0.5), size=9) +
+  coord_polar(theta = "y") +
+  scale_fill_manual(values = cols) +
+  xlim(c(0.2, hsize + 0.5)) + guides(fill=guide_legend(title="")) + 
+  theme(panel.background = element_rect(fill = "white"),
+        panel.grid = element_blank(),
+        axis.title = element_blank(),
+        axis.ticks = element_blank(),
+        axis.text = element_blank(), legend.text=element_text(size=rel(1.5)),legend.position="bottom") +
+  annotate(geom = 'text', x = 0.25, y = 0.0, label = "Type patient", color = 'black', size = 9)
+
+ggsave("Fig3c.pdf", p.3, width = 8, height = 8)
+
+out <- grid.arrange(p.1, p.2, p.3,  ncol=3,   widths = c(1.5, 1.5, 1.5))
+return(out)
+```
+
+
+# Figure 4
+```{r, echo=F, warning=FALSE, message=FALSE, comment=NA, results='hide'}
+# Fig 4a
+cols <-  hcl.colors(length(levels(dados$PROTOCOL)), "Temps")
+p.1 <- ggplot(data = dados, aes(x=PROTOCOL, y=AGE)) +
+  geom_dotplot(aes(x = "1"), binaxis="y", binwidth=0.8, stackdir="center") +
+  geom_boxplot(aes(x = "2"), width=0.6, fill = cols) +
+  facet_wrap(~PROTOCOL, strip.position = "bottom") +
+  labs(title="Protocol Care", y = "Age") +
+  theme(
+    plot.title = element_text(hjust = 0.5, size=22),
+    # panel.spacing.x = unit(0, "npc"),
+    panel.background = element_rect(fill = "white", colour = "black"),
+    strip.background = element_blank(),
+    strip.text = element_text(size=20),
+    axis.text.x = element_blank(),
+    axis.ticks.x = element_blank(),
+    axis.title.x = element_blank(),
+    text = element_text(size = 20)
+  )
+ggsave("Fig4a.pdf", p.1, width = 8, height = 8)
+
+# Fig 4b
+cols <-  hcl.colors(length(levels(dados$PATT)), "Green-Orange")
+p.2 <- ggplot(data = dados, aes(x=PATT, y=AGE)) +
+  geom_dotplot(aes(x = "1"), binaxis="y", binwidth=0.8, stackdir="center") +
+  geom_boxplot(aes(x = "2"), width=0.6, fill = cols) +
+  facet_wrap(~PATT, strip.position = "bottom") +
+  labs(title="Type patient", y = "Age") +
+  theme(
+    plot.title = element_text(hjust = 0.5, size=22),
+    # panel.spacing.x = unit(0, "npc"),
+    panel.background = element_rect(fill = "white", colour = "black"),
+    strip.background = element_blank(),
+    strip.text = element_text(size=20),
+    axis.text.x = element_blank(),
+    axis.ticks.x = element_blank(),
+    axis.title.x = element_blank(),
+    text = element_text(size = 20)
+  )
+
+ggsave("Fig4b.pdf", p.2, width = 8, height = 8)
+
+out <- grid.arrange(p.1, p.2,  ncol=2,   widths = c(1.5, 1.5))
+return(out)
+
+```
+
+# Figure 5
+### Figure 5a
+```{r, echo=F, warning=FALSE, message=FALSE, comment=NA}
+cols <-  hcl.colors(length(unique(dados$SEX)), "blue-Yellow 3")
+
+h.temp <- rcorrcens(formula=Surv(TCC,DELTA)~SEX, data=dados)
+harrel <- round(h.temp[,"C"], digits =3)
+
+
+fit <- survfit(Surv(TCC,DELTA)~SEX, data=dados) 
+
+pvalor <- round(surv_pvalue(fit)$pval, digits = 3)
+
+
+p.1 <- ggsurvplot(
+  fit,
+  data = dados,
+  size = 0.7,                 # change line size
+  palette =
+   cols,# custom color palettes
+  conf.int = TRUE,          # Add confidence interval
+  # pval = TRUE,              # Add p-value
+  risk.table = TRUE,        # Add risk table
+  xlab = "time (in hours) by sex",
+  ylab = "S(t)",
+  legend.title = "Sex",
+ # risk.table.col = "sex",# Risk table color by groups
+  # legend.labs =
+  #   c("Male", "Female"),    # Change legend labels
+  risk.table.height = 0.25, # Useful to change when you have multiple groups
+  ggtheme = theme_bw(),      # Change ggplot2 theme
+ risk.table.y.text = FALSE,
+ tables.theme = theme_cleantable(),
+ legend.labs =
+   c("Female","Male")    # change legend labels.
+)
+
+p.1$plot <- p.1$plot + 
+  theme( legend.position = c(0.8, 0.85), #"none", #  "right", #
+         legend.direction="vertical",
+         legend.title = element_blank()) 
+
+p.1$plot <- p.1$plot+
+  annotate("text", x=1.5, y=0.1,
+            label = deparse(bquote(~"C-ind" ==~  .(harrel))),
+            parse = T)
+
+p.1$plot <- p.1$plot+
+  annotate("text", x=1.5, y=0.2,
+            label = deparse(bquote(~"p-val" ==~  .(pvalor))),
+            parse = T)
+
+p.1
+
+kbl(rbind(c("C-Index","p-val:lograk"), c(harrel,pvalor)))
+
+# add method to grid.draw
+grid.draw.ggsurvplot <- function(x){
+  survminer:::print.ggsurvplot(x, newpage = FALSE)
+}
+
+# Remember to pass object `p`.
+ggsave("Fig5a.pdf", plot = p.1, width = 6, height = 6 )
+```
+
+### Figure 5b
+```{r, echo=F, warning=FALSE, message=FALSE, comment=NA}
+cols <-  hcl.colors(length(unique(dados$RACE)))
+
+h.temp <- rcorrcens(formula=Surv(TCC,DELTA)~RACE, data=dados)
+harrel <- round(h.temp[,"C"], digits =3)
+
+
+fit <- survfit(Surv(TCC,DELTA)~RACE, data=dados) 
+
+pvalor <- round(surv_pvalue(fit)$pval, digits = 3)
+
+
+p.1 <- ggsurvplot(
+  fit,
+  data = dados,
+  size = 0.7,                 # change line size
+  palette =
+   cols,# custom color palettes
+  conf.int = TRUE,          # Add confidence interval
+  # pval = TRUE,              # Add p-value
+  risk.table = TRUE,        # Add risk table
+  xlab = "time (in hours) of stay in the surgery center according to race",
+  ylab = "S(t)",
+  legend.title = "Race",
+ # risk.table.col = "sex",# Risk table color by groups
+  # legend.labs =
+  #   c("Male", "Female"),    # Change legend labels
+  risk.table.height = 0.25, # Useful to change when you have multiple groups
+  ggtheme = theme_bw(),      # Change ggplot2 theme
+ risk.table.y.text = FALSE,
+ tables.theme = theme_cleantable(),
+ legend.labs =
+  c("white","black","asian")  # change legend labels.
+)
+
+p.1$plot <- p.1$plot + 
+  theme( legend.position = c(0.8, 0.85), #"none", #  "right", #
+         legend.direction="vertical",
+         legend.title = element_blank()) 
+
+p.1$plot <- p.1$plot+
+  annotate("text", x=1.5, y=0.1,
+            label = deparse(bquote(~"C-ind" ==~  .(harrel))),
+            parse = T)
+
+p.1$plot <- p.1$plot+
+  annotate("text", x=1.5, y=0.2,
+            label = deparse(bquote(~"p-val" ==~  .(pvalor))),
+            parse = T)
+
+p.1
+
+kbl(rbind(c("C-Index","p-val:lograk"), c(harrel,pvalor)))
+
+# add method to grid.draw
+grid.draw.ggsurvplot <- function(x){
+  survminer:::print.ggsurvplot(x, newpage = FALSE)
+}
+
+# Remember to pass object `p`.
+ggsave("Fig5b.pdf", plot = p.1, width = 6, height = 6)
+```
+
+### Figure 5c
+```{r, echo=F, warning=FALSE, message=FALSE, comment=NA}
+cols <-  hcl.colors(length(unique(dados$PATT)))
+
+h.temp <- rcorrcens(formula=Surv(TCC,DELTA)~PATT, data=dados)
+harrel <- round(h.temp[,"C"], digits =3)
+
+
+fit <- survfit(Surv(TCC,DELTA)~PATT, data=dados) 
+
+pvalor <- round(surv_pvalue(fit)$pval, digits = 3)
+
+
+p.1 <- ggsurvplot(
+  fit,
+  data = dados,
+  size = 0.7,                 # change line size
+  palette =
+   cols,# custom color palettes
+  conf.int = TRUE,          # Add confidence interval
+  # pval = TRUE,              # Add p-value
+  risk.table = TRUE,        # Add risk table
+ xlab="time (in hours) of stay in the surgery center according to the type of patient",
+  ylab = "S(t)",
+  legend.title = "type",
+ # risk.table.col = "sex",# Risk table color by groups
+  # legend.labs =
+  #   c("Male", "Female"),    # Change legend labels
+  risk.table.height = 0.25, # Useful to change when you have multiple groups
+  ggtheme = theme_bw(),      # Change ggplot2 theme
+ risk.table.y.text = FALSE,
+ tables.theme = theme_cleantable(),
+ legend.labs =
+  c("congenital","coronary")
+)
+
+p.1$plot <- p.1$plot + 
+  theme( legend.position = c(0.8, 0.85), #"none", #  "right", #
+         legend.direction="vertical",
+         legend.title = element_blank()) 
+
+p.1$plot <- p.1$plot+
+  annotate("text", x=1.9, y=0.1,
+            label = deparse(bquote(~"C-ind" ==~  .(harrel))),
+            parse = T)
+
+p.1$plot <- p.1$plot+
+  annotate("text", x=1.5, y=0.2,
+            label = deparse(bquote(~"p-val" ==~  .(pvalor))),
+            parse = T)
+
+p.1
+
+kbl(rbind(c("C-Index","p-val:lograk"), c(harrel,pvalor)))
+
+# add method to grid.draw
+grid.draw.ggsurvplot <- function(x){
+  survminer:::print.ggsurvplot(x, newpage = FALSE)
+}
+
+# Remember to pass object `p`.
+ggsave("Fig5c.pdf", plot = p.1, width = 6, height = 6)
+```
+
+### Figure 5d
+```{r, echo=F, warning=FALSE, message=FALSE, comment=NA}
+cols <-  hcl.colors(length(unique(dados$PROTOCOL))+1)[-3]
+
+h.temp <- rcorrcens(formula=Surv(TCC,DELTA)~PROTOCOL, data=dados)
+harrel <- round(h.temp[,"C"], digits =3)
+
+
+fit <- survfit(Surv(TCC,DELTA)~PROTOCOL, data=dados) 
+
+pvalor <- round(surv_pvalue(fit)$pval, digits = 3)
+
+
+p.1 <- ggsurvplot(
+  fit,
+  data = dados,
+  size = 0.7,                 # change line size
+  palette =
+   cols,# custom color palettes
+  conf.int = TRUE,          # Add confidence interval
+  # pval = TRUE,              # Add p-value
+  risk.table = TRUE,        # Add risk table
+  xlab="time (in hours) of stay in the surgery center according to the protocol",
+  ylab = "S(t)",
+  legend.title = "Protocol",
+ # risk.table.col = "sex",# Risk table color by groups
+  # legend.labs =
+  #   c("Male", "Female"),    # Change legend labels
+  risk.table.height = 0.25, # Useful to change when you have multiple groups
+  ggtheme = theme_bw(),      # Change ggplot2 theme
+ risk.table.y.text = FALSE,
+ tables.theme = theme_cleantable(),
+ legend.labs =
+  c("conventional","fast-track")
+)
+
+p.1$plot <- p.1$plot + 
+  theme( legend.position = c(0.8, 0.85), #"none", #  "right", #
+         legend.direction="vertical",
+         legend.title = element_blank()) 
+
+p.1$plot <- p.1$plot+
+  annotate("text", x=1.5, y=0.1,
+            label = deparse(bquote(~"C-ind" ==~  .(harrel))),
+            parse = T)
+
+p.1$plot <- p.1$plot+
+  annotate("text", x=1.8, y=0.2,
+            label = deparse(bquote(~"p-val" ==~  .(pvalor))),
+            parse = T)
+
+p.1
+
+kbl(rbind(c("C-Index","p-val:lograk"), c(harrel,pvalor)))
+
+# add method to grid.draw
+grid.draw.ggsurvplot <- function(x){
+  survminer:::print.ggsurvplot(x, newpage = FALSE)
+}
+
+# Remember to pass object `p`.
+ggsave("Fig5d.pdf", plot = p.1, width = 6, height = 6)
+```
+
+# Weibull regression model parameter estimates
+### Table 4 - All covariates
+```{r, echo=F, warning=FALSE, message=FALSE, comment=NA}
+
+ajuste.W<-survreg(Surv(TCC,DELTA)~AGE+PROTOCOL+RACE+SEX+PATT, dist="weibull", data=dados)
+summary(ajuste.W)
+```
+
+### Table 5 - After model selection
+```{r, echo=F, warning=FALSE, message=FALSE, comment=NA}
+ajuste.w1<-survreg(Surv(TCC,DELTA)~PROTOCOL+RACE+PATT, dist="weibull", data=dados)
+summary(ajuste.w1)
+```
+
+# Goodness-of-fit
+## Figure 6
+### Figure 6a - goodness-of-fit
+```{r, echo=F, warning=FALSE, message=FALSE, comment=NA}
+xb<-ajuste.w1$linear.predictors
+gama.hat<-1/ajuste.w1$scale
+
+res.cox.snell <-numeric(145)
+for (i in 1:length(dados$TCC)) {
+	if(dados$DELTA[i]==1){
+	res.cox.snell[i]=(dados$TCC[i]*exp(-xb[i]))^gama.hat
+      } else {
+      	res.cox.snell[i]=((dados$TCC[i]*exp(-xb[i]))^gama.hat) + 1
+	}
+}
+
+ekm<-survfit(Surv(res.cox.snell,DELTA)~1, type=c("kaplan-meier"), data=dados)
+
+dados$xb <- xb 
+dados$res.cox.snell <- res.cox.snell
+db.1 <- data.frame(time = ekm$time, surv=ekm$surv, sexp1=exp(-ekm$time))
+
+p <- ggplot()+ geom_point(aes(x=surv, y=sexp1), db.1, col="black")+theme_bw()
+p <- p+labs(title="", y = "S(res) : Standard exponential", x="S(res): Kaplan-Meier")+geom_abline(intercept = 0, slope = 1, col="red")+xlim(0,1)+ylim(0,1)
+
+p
+
+ggsave("Fig6a.pdf", plot = p, width = 5, height = 5)
+```
+
+### Figure 6b - residual
+```{r, echo=F, warning=FALSE, message=FALSE, comment=NA}
+
+res <- sort(dados$res.cox.snell) 
+exp1 <- exp(-res)
+db.2 <- data.frame(res=res, exp1=exp1)
+p <- ggplot()+ geom_line(aes(x=time, y=surv, color="l1", linetype="l1"), db.1)+geom_line(aes(x=res, y=exp1, color="l2", linetype="l2"), db.2)+
+  scale_colour_manual(name = " ", values = c("l1"="black", "l2"="red"), 
+                      labels = c("Kaplan-Meier", "Standard exponential"))+
+  scale_linetype_manual(name = " ", values = c("l1"="solid", "l2"="solid"), 
+                        labels = c("Kaplan-Meier", "Standard exponential"))
+
+p <- p+labs(title="", y = "S(res) estimated", x="Residuals")+theme_bw()+theme(
+    legend.position = c(0.75, 0.85)
+    # ,
+    # legend.justification = c("left", "top"),
+    # legend.box.just = "left"
+  )
+
+p 
+ggsave("Fig6b.pdf", plot = p, width = 5, height = 5)
+```
+
+### Figure 6c
+```{r, echo=F, warning=FALSE, message=FALSE, comment=NA}
+dados$martingale <- dados$DELTA - dados$res.cox.snell
+dados$index <-1:nrow(dados) 
+dados$Name <- as.character(dados$index)
+
+
+p <- ggplot(data=dados)+ geom_point(aes(x=index, y=martingale), col="black")+ geom_text(aes(x=index, y=martingale, label=ifelse(martingale > -4,'', as.character(index))),hjust=-0.5,vjust=0)+theme_bw()
+p <- p+labs(title="", y = "Residuals", x="Index")
+
+p
+ggsave("Fig6c.pdf", plot = p, width = 5, height = 5)
+```
+
+### Figure 6d
+```{r, echo=F, warning=FALSE, message=FALSE, comment=NA}
+dados$res.martingale <- dados$DELTA - dados$res.cox.snell
+dados$index <-1:nrow(dados) 
+dados$res.deviance <- sign(dados$res.martingale)*(-2*(dados$res.martingale+dados$DELTA*log(dados$DELTA-dados$res.martingale)))^(1/2)
+
+p <- ggplot(data=dados)+ geom_point(aes(x=index, y=res.deviance), col="black")+ geom_text(aes(x=index, y=res.deviance, label=ifelse(res.deviance > -2.5,'', as.character(index))),hjust=-0.5,vjust=0)+theme_bw()
+p <- p+labs(title="", y = "Residuals", x="Index")
+
+p
+ggsave("Fig6d.pdf", plot = p, width = 5, height = 5)
+```
+
+### Figure 6e
+
+```{r, echo=F, warning=FALSE, message=FALSE, comment=NA}
+
+
+dados$corxb <- as.factor(xb)
+
+p <- ggplot(data=dados)+ geom_point(aes(x=xb, y=res.martingale, color=corxb))+ scale_color_brewer(palette="Dark2")+geom_text(aes(x=xb, y=res.martingale, label=ifelse( (res.martingale< -4)  ,as.character(index),'' )),hjust=1.3,vjust=0.3)+theme_bw()
+p <- p+labs(title="", y = "Residuals", x="Adjusted values")
+p <- p+  annotate(geom = 'text', x =dados$xb[124], y =dados$res.martingale[124], label = "124", color = 'black', hjust=1.3,vjust=0.3)
+p <- p+  annotate(geom = 'text', x =dados$xb[144], y =dados$res.martingale[144], label = "144", color = 'black', hjust=1.3,vjust=0.3)+theme(legend.position="none")
+
+p
+ggsave("Fig6e.pdf", plot = p, width = 5, height = 5)
+```
+
+### Figure 6f
+```{r, echo=F, warning=FALSE, message=FALSE, comment=NA}
+
+
+dados$corxb <- as.factor(xb)
+
+p <- ggplot(data=dados)+ geom_point(aes(x=xb, y=res.deviance, color=corxb))+ scale_color_brewer(palette="Dark2")+geom_text(aes(x=xb, y=res.deviance, label=ifelse( (res.deviance < -2.6)  ,as.character(index),'' )),hjust=1.3,vjust=0.3)+theme_bw()
+p <- p+labs(title="", y = "Residuals", x="Adjusted values")
+p <- p+  annotate(geom = 'text', x =dados$xb[124], y =dados$res.deviance[124], label = "124", color = 'black', hjust=1.3,vjust=0.3)
+p <- p+  annotate(geom = 'text', x =dados$xb[144], y =dados$res.deviance[144], label = "144", color = 'black', hjust=1.3,vjust=0.3)+theme(legend.position="none")
+
+p
+ggsave("Fig6f.pdf", plot = p, width = 5, height = 5)
+```
+
+# Influence analysis of points in Weibull model
+## Models after remove the influential observation
+
+### Remove observation 64
+
+```{r, echo=F, warning=FALSE, message=FALSE, comment=NA}
+modelo.64<-survreg(Surv(TCC,DELTA)~PROTOCOL+PATT, subset=-64, dist="weibull", data=dados)
+summary(modelo.64)
+```
+
+### Remove observation 101
+
+```{r, echo=F, warning=FALSE, message=FALSE, comment=NA}
+modelo.101<-survreg(Surv(TCC,DELTA)~PROTOCOL+PATT, subset=-101, dist="weibull", data=dados)
+summary(modelo.101)
+```
+
+### Remove observation 124
+
+```{r, echo=F, warning=FALSE, message=FALSE, comment=NA}
+modelo.124<-survreg(Surv(TCC,DELTA)~PROTOCOL+PATT, subset=-124, dist="weibull", data=dados)
+summary(modelo.124)
+```
+
+
+### Remove observation 144
+
+```{r, echo=F, warning=FALSE, message=FALSE, comment=NA}
+modelo.144<-survreg(Surv(TCC,DELTA)~PROTOCOL+PATT, subset=-144, dist="weibull", data=dados)
+summary(modelo.144)
+```
+
+### Remove the set of observations (63, 101,  144) 
+
+```{r, echo=F, warning=FALSE, message=FALSE, comment=NA}
+modelo.64.101.144<-survreg(Surv(TCC,DELTA)~PROTOCOL+PATT, subset=c(-64,-101,-124,-144), dist="weibull", data=dados)
+summary(modelo.64.101.144)
+```
+
+
+### Remove the set of observations (63, 101, 124, 144) 
+
+```{r, echo=F, warning=FALSE, message=FALSE, comment=NA}
+modelo.64.101.124.144<-survreg(Surv(TCC,DELTA)~PROTOCOL+PATT, subset=c(-64,-101,-124,-144), dist="weibull", data=dados)
+summary(modelo.64.101.124.144)
+```
+
+### Table 7 - After model selection
+```{r, echo=F, warning=FALSE, message=FALSE, comment=NA}
+ajuste.w1<-survreg(Surv(TCC,DELTA)~PROTOCOL+PATT, dist="weibull", data=dados)
+summary(ajuste.w1)
+
+temp <- concordance(ajuste.w1) # Calcula Índice C
+
+a <- temp$concordance
+b <- 1-a
+kable(rbind(c("C-index","error-rate"), c(a,b)), caption="Performance:  Weibull model", digits = 2) 
+```
+
+# Goodness-of-fit
+## Figure 7
+### Figure 7a - goodness-of-fit
+```{r, echo=F, warning=FALSE, message=FALSE, comment=NA}
+xb<-ajuste.w1$linear.predictors
+gama.hat<-1/ajuste.w1$scale
+
+res.cox.snell <-numeric(145)
+for (i in 1:length(dados$TCC)) {
+	if(dados$DELTA[i]==1){
+	res.cox.snell[i]=(dados$TCC[i]*exp(-xb[i]))^gama.hat
+      } else {
+      	res.cox.snell[i]=((dados$TCC[i]*exp(-xb[i]))^gama.hat) + 1
+	}
+}
+
+ekm<-survfit(Surv(res.cox.snell,DELTA)~1, type=c("kaplan-meier"), data=dados)
+
+dados$xb <- xb 
+dados$res.cox.snell <- res.cox.snell
+db.1 <- data.frame(time = ekm$time, surv=ekm$surv, sexp1=exp(-ekm$time))
+
+p <- ggplot()+ geom_point(aes(x=surv, y=sexp1), db.1, col="black")+theme_bw()
+p <- p+labs(title="", y = "S(res) : Standard exponential", x="S(res): Kaplan-Meier")+geom_abline(intercept = 0, slope = 1, col="red")+xlim(0,1)+ylim(0,1)
+
+p
+
+ggsave("Fig7a.pdf", plot = p, width = 5, height = 5)
+```
+
+### Figure 7b - residual
+```{r, echo=F, warning=FALSE, message=FALSE, comment=NA}
+
+res <- sort(dados$res.cox.snell) 
+exp1 <- exp(-res)
+db.2 <- data.frame(res=res, exp1=exp1)
+p <- ggplot()+ geom_line(aes(x=time, y=surv, color="l1", linetype="l1"), db.1)+geom_line(aes(x=res, y=exp1, color="l2", linetype="l2"), db.2)+
+  scale_colour_manual(name = " ", values = c("l1"="black", "l2"="red"), 
+                      labels = c("Kaplan-Meier", "Standard exponential"))+
+  scale_linetype_manual(name = " ", values = c("l1"="solid", "l2"="solid"), 
+                        labels = c("Kaplan-Meier", "Standard exponential"))
+
+p <- p+labs(title="", y = "S(res) estimated", x="Residuals")+theme_bw()+theme(
+    legend.position = c(0.75, 0.85)
+    # ,
+    # legend.justification = c("left", "top"),
+    # legend.box.just = "left"
+  )
+
+p 
+ggsave("Fig7b.pdf", plot = p, width = 5, height = 5)
+```
+
+### Figure 7c
+```{r, echo=F, warning=FALSE, message=FALSE, comment=NA}
+dados$martingale <- dados$DELTA - dados$res.cox.snell
+dados$index <-1:nrow(dados) 
+dados$Name <- as.character(dados$index)
+
+
+p <- ggplot(data=dados)+ geom_point(aes(x=index, y=martingale), col="black")+ geom_text(aes(x=index, y=martingale, label=ifelse(martingale > -4,'', as.character(index))),hjust=-0.5,vjust=0)+theme_bw()
+p <- p+labs(title="", y = "Residuals", x="Index")
+
+p
+ggsave("Fig7c.pdf", plot = p, width = 5, height = 5)
+```
+
+### Figure 7d
+```{r, echo=F, warning=FALSE, message=FALSE, comment=NA}
+dados$res.martingale <- dados$DELTA - dados$res.cox.snell
+dados$index <-1:nrow(dados) 
+dados$res.deviance <- sign(dados$res.martingale)*(-2*(dados$res.martingale+dados$DELTA*log(dados$DELTA-dados$res.martingale)))^(1/2)
+
+p <- ggplot(data=dados)+ geom_point(aes(x=index, y=res.deviance), col="black")+ geom_text(aes(x=index, y=res.deviance, label=ifelse(res.deviance > -2.5,'', as.character(index))),hjust=-0.5,vjust=0)+theme_bw()
+p <- p+labs(title="", y = "Residuals", x="Index")
+
+p
+ggsave("Fig7d.pdf", plot = p, width = 5, height = 5)
+```
+
+### Figure 7e
+
+```{r, echo=F, warning=FALSE, message=FALSE, comment=NA}
+
+
+dados$corxb <- as.factor(xb)
+
+p <- ggplot(data=dados)+ geom_point(aes(x=xb, y=res.martingale, color=corxb))+ scale_color_brewer(palette="Dark2")+geom_text(aes(x=xb, y=res.martingale, label=ifelse( (res.martingale< -4)  ,as.character(index),'' )),hjust=1.3,vjust=0.3)+theme_bw()
+p <- p+labs(title="", y = "Residuals", x="Adjusted values")
+# p <- p+  annotate(geom = 'text', x =dados$xb[124], y =dados$res.martingale[124], label = "124", color = 'black', hjust=1.3,vjust=0.3)
+p <- p+  annotate(geom = 'text', x =dados$xb[144], y =dados$res.martingale[144], label = "144", color = 'black', hjust=1.3,vjust=0.3)+theme(legend.position="none")
+
+p
+ggsave("Fig7e.pdf", plot = p, width = 5, height = 5)
+```
+
+### Figure 7f
+```{r, echo=F, warning=FALSE, message=FALSE, comment=NA}
+
+
+dados$corxb <- as.factor(xb)
+
+p <- ggplot(data=dados)+ geom_point(aes(x=xb, y=res.deviance, color=corxb))+ scale_color_brewer(palette="Dark2")+geom_text(aes(x=xb, y=res.deviance, label=ifelse( (res.deviance < -2.5)  ,as.character(index),'' )),hjust=1.3,vjust=0.3)+theme_bw()
+p <- p+labs(title="", y = "Residuals", x="Adjusted values")
+# p <- p+  annotate(geom = 'text', x =dados$xb[124], y =dados$res.deviance[124], label = "124", color = 'black', hjust=1.3,vjust=0.3)
+p <- p+  annotate(geom = 'text', x =dados$xb[144], y =dados$res.deviance[144], label = "144", color = 'black', hjust=1.3,vjust=0.3)+theme(legend.position="none")
+
+p
+ggsave("Fig7f.pdf", plot = p, width = 5, height = 5)
+```
+
+
+# Random Forest result
+
+```{r, echo=F, warning=FALSE, message=FALSE, comment=NA}
+rm(dados)
+# clean memory and data set to RF
+gc()
+
+dados <- read_excel("viarapida.xlsm",sheet=1, col_names=T)
+colnames(dados)<-c("TCC", "DELTA", "AGE", "PROTOCOL", "RACE", "SEX", "PATT")
+dados <- na.omit(dados)
+
+NTREE = 1000 # N?mero de arboles.
+NODESIZE = 10 # Tamaño minimo del nodo terminal. 
+## Los valores predeterminados son: supervivencia (15), 
+## riesgo competitivo (15), regresión (5), clasificación (1), 
+## resultados mixtos (3), sin supervisión (3). 
+## Se recomienda experimentar con diferentes valores.
+MTRY = 3 # Número de variables a dividir posiblemente en cada nodo.
+NSPLIT = 0 # Entero no negativo que especifica el n?mero de divisiones 
+# aleatorias para dividir una variable. Cuando es cero, 
+# se utilizan todos los valores de divisi?n (división determinista), 
+# que puede ser más lento. De manera predeterminada, se usa 10, 
+# excepto para regresión y clasificación, 
+# que usa cero (para división determinista).
+IMPORTANCE = TRUE
+
+set.seed(456) ## 1116
+#set.seed(3456)
+trainIndex <- createDataPartition(dados$DELTA, p = .8, 
+                                  list = FALSE, 
+                                  times = 1)
+
+train <- dados[ trainIndex,]
+test  <- dados[-trainIndex,]
+
+
+obj <- rfsrc(Surv(TCC,DELTA)~., train,
+             ntree = NTREE, 
+             nodesize = NODESIZE, 
+             mtry = MTRY, 
+             nsplit = NSPLIT, 
+             importance = IMPORTANCE, seed=435) # 6650  105 6543 (este funciona)
+```
+
+```{r, echo=F, warning=FALSE, message=FALSE, comment=NA}
+p <- plot(gg_error(obj)) + geom_line(size=0.75) +theme_bw()
+
+p 
+ggsave("Fig8a.pdf", plot = p, width = 5, height = 5)
+
+
+p <- plot(gg_vimp(obj)) + scale_size_area() + ylab("Variable importance") +theme_bw()
+
+p
+ggsave("Fig8b.pdf", plot = p, width = 5, height = 5)
+
+```
+
+# Table 9
+
+```{r, echo=F, warning=FALSE, message=FALSE, comment=NA}
+a <- 1-get.cindex(time = obj$yvar[,1], 
+             censoring = obj$yvar[,2], 
+             predicted = obj$predicted.oob)
+
+b <- 1-a
+kable(rbind(c("C-index","error-rate"), c(a,b)), caption="Performance:  RF(training)", digits = 2) 
+
+cat("Variable Importance")
+vimp(obj, importance = "random")
+vimp(obj, importance = "random")$importance
+
+pred <- predict(obj, test,  na.action = "na.impute")
+a <- 1-get.cindex(time = pred$yvar[,1], 
+             censoring = pred$yvar[,2], 
+             predicted = pred$predicted)
+b <- 1-a
+kable(rbind(c("C-index","error-rate"), c(a,b)), caption="Performance:  RF(test)", digits = 2) 
+
+
+pred
+
+#plot(pred)
+#plot.survival(pred)
+
+
+```
+
+
