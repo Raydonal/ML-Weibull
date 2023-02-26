@@ -1,7 +1,8 @@
 # ML-Weibull
 
-###
+<h2>
 Reproducible research on paper Weibull Regression and Machine Learning Survival Models. Methodology, Comparison and Application to Biomedical Data Related to Cardiac Surgery
+</h2>  
 
 ###Atuhors:
 Thalytta Cavalcante, Raydonal Ospina, Víctor Leiva, Xavier Cabezas, Carlos Martin-Barreiro
